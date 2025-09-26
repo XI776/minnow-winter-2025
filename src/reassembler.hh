@@ -2,20 +2,30 @@
 
 #include "byte_stream.hh"
 #include <map>
+#include <unordered_map>
 #include <optional>
+#include <concepts>
+#include <vector>
+#include <queue>
+#include <cassert>
 
 class Reassembler
 {
 public:
   // Construct Reassembler to write into given ByteStream.
-  explicit Reassembler( ByteStream&& output ) : 
-  output_( std::move( output ) ),
-  bigcapacity_(1046),
-  str_capacity_(output_.writer().available_capacity()),
-  next_index(0),
-  final_index_(0),
-  strs()
-   {}
+  explicit Reassembler( ByteStream&& output ) 
+   : unassemble_strs_()
+    , next_assembled_idx_(0)
+    , unassembled_bytes_num_(0)
+    , eof_idx_(-1)
+    , output_(std::move( output ) )
+    , capacity_(output.writer().available_capacity()) {}
+
+  // min_heap(std::greater<Interval<uint64_t>>(), std::vector<Interval<uint64_t>>())
+  
+  // min_heap,
+  // start_to_string{}
+   
 
   /*
    * Insert a new substring to be reassembled into a ByteStream.
@@ -49,16 +59,30 @@ public:
 
   // Access output stream writer, but const-only (can't write from outside)
   const Writer& writer() const { return output_.writer(); }
-  bool is_avilable(uint64_t index) const {return str_capacity_ > index;}
-  void append_to_map(uint64_t first_index,  const std::string &data);
-  void check_and_close();
-  void push_and_trim();
+  // bool is_avilable(uint64_t index) const {return str_capacity_ > index;}
+  // void append_to_map(uint64_t first_index,  const std::string &data);
+  // void check_and_close();
+  // void push_and_trim();
+  // void check_and_close();
 private:
-  ByteStream output_;
-  uint64_t bigcapacity_;
-  uint64_t str_capacity_;
-  uint64_t next_index;
-  std::optional<uint64_t> final_index_;
+  // ByteStream output_;
+  // // uint64_t str_capacity_;
+  // uint64_t expected_next_index;
+  // uint64_t final_index;
+  // uint64_t bytes_pending_ ;
+  // bool last_substring_seen_;
+  // std::priority_queue<
+  //   Interval<uint64_t>,                 // (1) 要存储的数据类型
+  //   std::vector<Interval<uint64_t>>,    // (2) 存储数据的底层容器
+  //   std::greater<Interval<uint64_t>>    // (3) 比较器（决定是最大堆还是最小堆）
+  // > min_heap;
+  // std::unordered_map<uint64_t, std::string> start_to_string;
+  std::map<size_t, std::string> unassemble_strs_;
+  size_t next_assembled_idx_;
+  size_t unassembled_bytes_num_;
+  size_t eof_idx_;
 
-  std::map<uint64_t, std::string> strs;
+  ByteStream output_;  //!< The reassembled in-order byte stream
+  size_t capacity_;    //!< The maximum number of bytes
 };
+

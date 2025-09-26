@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 #include <string_view>
 
 class Reader;
@@ -20,18 +21,20 @@ public:
 
   void set_error() { error_ = true; };       // Signal that the stream suffered an error.
   bool has_error() const { return error_; }; // Has the stream had an error?
-
+  bool full() const {return head_ == tail_;}
 protected:
   // Please add any additional state to the ByteStream here, and not to the Writer and Reader interfaces.
   uint64_t capacity_;
   bool error_ {};
-  // my code here
-  std::string buffer;
-  uint64_t index = 0;
-  uint64_t cnt = 0;
-  bool closed_ = false;
-  uint64_t total_pushed = 0;
-  uint64_t total_poped = 0;
+  std::vector<char> buffer_ {};
+  uint64_t size_;
+  uint64_t head_;
+  uint64_t tail_;
+  uint64_t copy_mark_ {}; // if head_ >= copy_mark_, we need to move the whole queue back to the start of the buffer_
+
+  bool closed_;
+  uint64_t total_pushed_ ;
+  uint64_t total_poped_ ;
   
 };
 
