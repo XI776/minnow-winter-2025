@@ -27,4 +27,10 @@ public:
 
 private:
   Reassembler reassembler_;
+  uint64_t checkpoint {0};
+  Wrap32 zero_point {0};
+  bool connected {false};
+  bool RST {false};
+  bool SYN {false};
+  bool FIN {false};
 };

@@ -62,6 +62,6 @@ public:
 
 /*
  * read: A (provided) helper function thats peeks and pops up to `max_len` bytes
- * from a ByteStream Reader into a string;
+ * from a ByteS》tream Reader into a string;
  */
 void read( Reader& reader, uint64_t max_len, std::string& out );

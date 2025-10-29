@@ -5,47 +5,8 @@
 using namespace std;
 
 void Reassembler::insert( uint64_t first_index, string data, bool is_last_substring ){
-  // if (output_.writer().is_closed()) {
-  //   return;
-  // }
-  // 获取 map 中第一个大于 index 的迭代器指针
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+  // std::cerr << "first_index = " << first_index <<" expected_idx = " << next_assembled_idx_
+  //  << " data = " << data << std::endl;
 
   auto pos_iter = unassemble_strs_.upper_bound(first_index);
   // 尝试获取一个小于等于 index 的迭代器指针
@@ -131,15 +92,15 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
   }
   if(data_size > 0) {
     const string new_data = data.substr(data_start_pos, data_size);
-    std::cerr << "new_data = " << new_data << " index = " << first_index << "\n";
-    std::cerr << "new_idx = " << new_idx << " next_index = " << next_assembled_idx_ << "\n";
+    // std::cerr << "new_data = " << new_data << " index = " << first_index << "\n";
+    // std::cerr << "new_idx = " << new_idx << " next_index = " << next_assembled_idx_ << "\n";
 
     if(new_idx == next_assembled_idx_) {
       size_t write_byte = std::min(output_.writer().available_capacity(), static_cast<size_t>(data_size));
       output_.writer().push(new_data);
       // write_byte -= output_.writer().available_capacity();
       next_assembled_idx_ += write_byte;
-      std::cerr << "write_byte = " << write_byte << " next_assembled_idx_ = " << next_assembled_idx_ << "\n";
+      // std::cerr << "write_byte = " << write_byte << " next_assembled_idx_ = " << next_assembled_idx_ << "\n";
       // if(write_byte < data_size) {
       // // 确保 data_size 是非负数，然后进行安全比较
       // if (data_size > 0 && write_byte < static_cast<size_t>(data_size)) {
@@ -157,10 +118,10 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
         unassemble_strs_.insert(make_pair(new_idx, std::move(data_to_store)));
       }
   }
-  std::cerr << "unassemble_strs_ size = " << unassemble_strs_.size() << "\n";
+  // std::cerr << "unassemble_strs_ size = " << unassemble_strs_.size() << "\n";
   for(auto iter = unassemble_strs_.begin(); iter != unassemble_strs_.end();) {
     assert(next_assembled_idx_ <= iter->first);
-    std::cerr << "iter->first = " << iter->first << " next_idx = " << next_assembled_idx_ << "\n";
+    // std::cerr << "iter->first = " << iter->first << " next_idx = " << next_assembled_idx_ << "\n";
 
     if(iter->first == next_assembled_idx_) {
       const size_t write_num = min(output_.writer().available_capacity(), iter->second.size());
@@ -175,7 +136,7 @@ void Reassembler::insert( uint64_t first_index, string data, bool is_last_substr
         unassemble_strs_.erase(iter);
         break;
       }
-      std::cerr << "unassembled_bytes_num = " <<  unassembled_bytes_num_ << " str.size() = " << iter->second.size() << "\n";
+      // std::cerr << "unassembled_bytes_num = " <<  unassembled_bytes_num_ << " str.size() = " << iter->second.size() << "\n";
 
       unassembled_bytes_num_ -= iter->second.size();
       iter = unassemble_strs_.erase(iter);
