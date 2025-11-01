@@ -7,7 +7,10 @@ using namespace std;
 void Reassembler::insert( uint64_t first_index, string data, bool is_last_substring ){
   // std::cerr << "first_index = " << first_index <<" expected_idx = " << next_assembled_idx_
   //  << " data = " << data << std::endl;
-
+  if (first_index >= next_assembled_idx_ + capacity_) {
+            // 超大索引或者溢出，直接丢弃
+            return;
+  }
   auto pos_iter = unassemble_strs_.upper_bound(first_index);
   // 尝试获取一个小于等于 index 的迭代器指针
   if (pos_iter != unassemble_strs_.begin())
