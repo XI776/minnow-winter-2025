@@ -32,4 +32,6 @@ struct ARPMessage
 
   void parse( Parser& parser );
   void serialize( Serializer& serializer ) const;
+
+  
 };
