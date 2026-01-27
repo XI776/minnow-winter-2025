@@ -21,12 +21,9 @@ NetworkInterface::NetworkInterface( string_view name,
   , port_( notnull( "OutputPort", move( port ) ) )
   , ethernet_address_( ethernet_address )
   , ip_address_( ip_address )
-  , arp_cache_()
-  , datagrams_cache_()
-  , arp_pending_()
 {
-  cerr << "DEBUG: Network interface has Ethernet address " << to_string( ethernet_address_ ) << " and IP address "
-       << ip_address.ip() << "\n";
+  // cerr << "DEBUG: Network interface has Ethernet address " << to_string( ethernet_address_ ) << " and IP address "
+  //      << ip_address.ip() << "\n";
 }
 
 //! \param[in] dgram the IPv4 datagram to be sent
@@ -35,131 +32,127 @@ NetworkInterface::NetworkInterface( string_view name,
 //! can be converted to a uint32_t (raw 32-bit IP address) by using the Address::ipv4_numeric() method.
 void NetworkInterface::send_datagram( const InternetDatagram& dgram, const Address& next_hop )
 {
+  const uint32_t next_hop_ip = next_hop.ipv4_numeric();
 
+  // 1. 查找 ARP 缓存
+  auto it = arp_table_.find(next_hop_ip);
+  if ( it != arp_table_.end() ) {
+    EthernetFrame frame;
+    frame.header.src = ethernet_address_;
+    frame.header.dst = it->second.address;
+    frame.header.type = EthernetHeader::TYPE_IPv4;
+    frame.payload = serialize( dgram ); // 性能优化：直接序列化到 payload
+    transmit( frame );
+    return;
+  }
+
+  // 2. 没找到 MAC，先存入代发队列
+  waiting_packets_[next_hop_ip].push_back(dgram);
+
+  // 3. 检查 5 秒内是否已经发过 ARP REQUEST
+  if (arp_request_timer_.find(next_hop_ip) != arp_request_timer_.end()) {
+      return;
+  }
+
+  // 4. 发送 ARP 广播请求
+  ARPMessage arpmessage;
+  arpmessage.opcode = ARPMessage::OPCODE_REQUEST;
+  arpmessage.sender_ethernet_address = ethernet_address_;
+  arpmessage.sender_ip_address = ip_address_.ipv4_numeric();
+  arpmessage.target_ip_address = next_hop_ip;
+  
   EthernetFrame frame;
   frame.header.src = ethernet_address_;
-  uint32_t dst_ip_ = next_hop.ipv4_numeric();
-  Serializer serializer;
-  if (arp_cache_.find(dst_ip_) != arp_cache_.end()) {
-    frame.header.dst = arp_cache_[dst_ip_].address;
-    frame.header.type = EthernetHeader::TYPE_IPv4;
-    dgram.serialize(serializer);
-    serializer.buffer(frame.payload);
-    frame.payload = serializer.finish();
-  }
-  else {
-    if (arp_pending_.find(dst_ip_) != arp_pending_.end()) {
-      datagrams_cache_[dst_ip_].push(dgram);
-      return;
-    }
-    arp_pending_[dst_ip_] = ARP_PENDING_TIME;
-    frame.header.type = EthernetHeader::TYPE_ARP;
-    frame.header.dst = ETHERNET_BROADCAST;
-
-    // 如果目的地址不知道，先发送ARP
-    ARPMessage arpmessage;
-
-    arpmessage.opcode = ARPMessage::OPCODE_REQUEST;
-    arpmessage.sender_ethernet_address = ethernet_address_;
-    arpmessage.sender_ip_address = ip_address_.ipv4_numeric();
-    // 广播
+  frame.header.dst = ETHERNET_BROADCAST;
+  frame.header.type = EthernetHeader::TYPE_ARP;
+  frame.payload = serialize(arpmessage);
   
-    arpmessage.target_ip_address = next_hop.ipv4_numeric();
-    
-    arpmessage.serialize(serializer);
-    frame.payload = serializer.finish();
-    std::queue<InternetDatagram> queue;
-    queue.push(dgram);
-    datagrams_cache_.insert({dst_ip_, queue});
-  }
   transmit(frame);
+  arp_request_timer_[next_hop_ip] = ARP_REQUEST_TTL;
+
 }
 
 //! \param[in] frame the incoming Ethernet frame
 void NetworkInterface::recv_frame( EthernetFrame frame )
 {
-
-  Parser parser(frame.payload);
-
-  // 如果是ipv4
+  // 1. 基础过滤: 目标不是我，并且不是广播，直接丢弃
+  if (frame.header.dst != ethernet_address_ && frame.header.dst != ETHERNET_BROADCAST) {
+    return;
+  }
+  // 2. 处理 IPV4 数据包
   if (frame.header.type == EthernetHeader::TYPE_IPv4) {
     InternetDatagram dgram;
-    dgram.parse(parser);
-    if (frame.header.dst != ethernet_address_) {
-      cerr << "InternetDatagram.target_ip_address != local address, just ignore\n"; 
-      return;
+    if (parse(dgram, frame.payload)) {
+      datagrams_received_.push( move( dgram ) );
     }
-    datagrams_received_.push(dgram);
   }
-  else if (frame.header.type == EthernetHeader::TYPE_ARP){
-    ARPMessage arpmessage;
-    arpmessage.parse(parser);
-
-    if (arpmessage.target_ip_address != ip_address_.ipv4_numeric()) {
-      cerr << "arpmessage.target_ip_address != local address, just ignore\n"; 
+  // 3. 处理 ARP 数据包
+  else if (frame.header.type == EthernetHeader::TYPE_ARP){ // ARP
+    ARPMessage msg;
+    if (!parse(msg, frame.payload)) {
       return;
     }
+    const uint32_t sender_ip = msg.sender_ip_address;
+    // 只要收到 ARP 包，就学习发送者的映射 
+    arp_table_[sender_ip] = {msg.sender_ethernet_address, ARP_TTL};
 
-    if (arpmessage.opcode == ARPMessage::OPCODE_REQUEST) {
-      EthernetFrame frame1;
-      frame1.header.src = ethernet_address_;
-      frame1.header.type = EthernetHeader::TYPE_ARP;
-      frame1.header.dst = arpmessage.sender_ethernet_address;
+    // 如果是请求我 IP的Request，回复 Reply 
+    if (msg.opcode == ARPMessage::OPCODE_REQUEST && msg.target_ip_address == ip_address_.ipv4_numeric()) {
+      ARPMessage reply;
+      reply.opcode = ARPMessage::OPCODE_REPLY;
+      reply.sender_ethernet_address = ethernet_address_;
+      reply.sender_ip_address = ip_address_.ipv4_numeric();
+      reply.target_ip_address = sender_ip;
+      reply.target_ethernet_address = msg.sender_ethernet_address;
 
-      ARPMessage arpmessage1;
-      arpmessage1.opcode = ARPMessage::OPCODE_REPLY;
-      arpmessage1.sender_ethernet_address = ethernet_address_;
-      arpmessage1.sender_ip_address = ip_address_.ipv4_numeric();
-      arpmessage1.target_ip_address = arpmessage.sender_ip_address;
-      arpmessage1.target_ethernet_address = arpmessage.sender_ethernet_address;
 
-      Serializer serializer;
-      arpmessage1.serialize(serializer);
-      frame1.payload = serializer.finish();
-      transmit(frame1);
-      EthernetAddress_and_time et(arpmessage.sender_ethernet_address, ARP_TIME_TO_LIVE);
-      arp_cache_[arpmessage.sender_ip_address] = et;
+      EthernetFrame reply_frame;
+      reply_frame.header.src = ethernet_address_;
+      reply_frame.header.type = EthernetHeader::TYPE_ARP;
+      reply_frame.header.dst = msg.sender_ethernet_address;
+      reply_frame.payload = serialize(reply);
+      transmit(reply_frame);
+
     }
-    else if (arpmessage.opcode == ARPMessage::OPCODE_REPLY) {
-      EthernetAddress_and_time et(arpmessage.sender_ethernet_address, ARP_TIME_TO_LIVE);
-      arp_cache_[arpmessage.sender_ip_address] = et;
 
-      arp_pending_.erase(arpmessage.sender_ip_address);
-
-      auto it = datagrams_cache_.find(arpmessage.sender_ip_address);
-      if (it != datagrams_cache_.end()) {
-        auto& que = it->second;
-        Address next_hop = Address::from_ipv4_numeric(it->first);
-        while (!que.empty()) {
-          auto dgram = que.front();
-          que.pop();
-          send_datagram(dgram, next_hop);
+    // 4. 检查是否有包在等待这个 IP 的 MAC 地址
+      auto it = waiting_packets_.find(sender_ip);
+      if (it != waiting_packets_.end()) {
+        for (const auto& dgram: it->second) {
+          EthernetFrame f;
+          f.header.src = ethernet_address_;
+          f.header.dst = msg.sender_ethernet_address;
+          f.header.type = EthernetHeader::TYPE_IPv4;
+          f.payload = serialize( dgram );
+          transmit( f );
         }
+        waiting_packets_.erase(it);
+        arp_request_timer_.erase( sender_ip );
       }
     }
   }
 
-}
 
 //! \param[in] ms_since_last_tick the number of milliseconds since the last call to this method
 void NetworkInterface::tick( const size_t ms_since_last_tick )
 {
-  // debug( "unimplemented tick({}) called", ms_since_last_tick );
 
-  for (auto it = arp_cache_.begin(); it != arp_cache_.end(); ) {
-    if (it->second.left_waiting_time <= ms_since_last_tick) {
-      // send_datagram();//?
-      it = arp_cache_.erase(it);
+  // 1. 清理过期的 ARP 缓存
+  for (auto it = arp_table_.begin(); it != arp_table_.end(); ) {
+    if (it->second.ttl <= ms_since_last_tick) {
+      it = arp_table_.erase(it);
     }
     else {
-      it->second.left_waiting_time -= ms_since_last_tick;
+      it->second.ttl -= ms_since_last_tick;
       ++it;
     }
   }
-
-  for (auto it = arp_pending_.begin(); it != arp_pending_.end(); ) {
+  // 2. 清理 ARP Request 计时器
+  for (auto it = arp_request_timer_.begin(); it != arp_request_timer_.end(); ) {
     if (it->second <= ms_since_last_tick) {
-      it = arp_pending_.erase(it);  // erase 返回下一个
+      uint32_t ip = it->first;
+      it = arp_request_timer_.erase(it);  // erase 返回下一个
+      waiting_packets_.erase(ip);
     }
     else {
       it->second -= ms_since_last_tick;
@@ -167,13 +160,5 @@ void NetworkInterface::tick( const size_t ms_since_last_tick )
     }
   }
 
-  for (auto it = datagrams_cache_.begin(); it != datagrams_cache_.end(); ) {
-    if (arp_pending_.find(it->first) == arp_pending_.end()) {
-        it = datagrams_cache_.erase(it);
-    }
-    else {
-      ++it;
-    }
-  }
-  
+
 }

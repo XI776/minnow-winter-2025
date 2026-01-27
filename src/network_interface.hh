@@ -68,20 +68,13 @@ public:
   std::queue<InternetDatagram>& datagrams_received() { return datagrams_received_; }
 
 
-  class Dgram_cache {
-    public:
-      InternetDatagram dgram;
-      Address next_hop;
-  };
-
-  class EthernetAddress_and_time {
-    public:
+  struct ArpEntry {
       EthernetAddress address;
-      uint32_t left_waiting_time;
+      uint32_t ttl;
   };
 
-  const uint32_t ARP_TIME_TO_LIVE = 30000;
-  const uint32_t ARP_PENDING_TIME = 5000;
+  static constexpr uint32_t ARP_TTL = 30000; // 30s 缓存
+  static constexpr uint32_t ARP_REQUEST_TTL = 5000; // 5s 重发间隔，都是ms为单位的
 
 
 private:
@@ -102,13 +95,13 @@ private:
   std::queue<InternetDatagram> datagrams_received_ {};
 
 
-  // Ethernet frame ARP映射
-  std::unordered_map<uint32_t, EthernetAddress_and_time> arp_cache_;
+  // IP -> {MAC, TTL}
+  std::unordered_map<uint32_t, ArpEntry> arp_table_ {};
 
-  // Datagrams that have no arp 
-  std::unordered_map<uint32_t, std::queue<InternetDatagram>> datagrams_cache_;
+  // IP -> packets
+  std::unordered_map<uint32_t, std::vector<InternetDatagram>> waiting_packets_ {};
 
-  // 
-  std::unordered_map<uint32_t, uint32_t> arp_pending_;
+  // IP -> ARP 倒计时
+  std::unordered_map<uint32_t, uint32_t> arp_request_timer_ {};
 
 };

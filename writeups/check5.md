@@ -1,5 +1,4 @@
-Checkpoint 5 Writeup
-====================
+# Checkpoint 5 Writeup
 
 My name: [your name here]
 
@@ -9,11 +8,11 @@ I collaborated with: [list sunetids here]
 
 I would like to thank/reward these classmates for their help: [list sunetids here]
 
-This checkpoint took me about [n] hours to do. I [did/did not] attend the lab session.
+This checkpoint took me about [5] hours to do. I [did not] attend the lab session.
 
 Program Structure and Design of the NetworkInterface [Describe data
 structures and approach taken. Describe alternative designs considered
-or tested.  Describe benefits and weaknesses of your design compared
+or tested. Describe benefits and weaknesses of your design compared
 with alternatives -- perhaps in terms of simplicity/complexity, risk
 of bugs, asymptotic performance, empirical performance, required
 implementation time and difficulty, and other factors. Include any
@@ -21,10 +20,10 @@ measurements if applicable.]:
 []
 
 Implementation Challenges:
-[]
+[是arp解析的内容，不知道改用什么样的数据结构比较合适]
 
 Remaining Bugs:
-[]
+[no]
 
 - Optional: I had unexpected difficulty with: [describe]
 
