@@ -7,6 +7,7 @@
 #include "helpers.hh"
 #include "network_interface.hh"
 #include <cstdint>
+#include <algorithm>
 
 using namespace std;
 
@@ -21,6 +22,8 @@ NetworkInterface::NetworkInterface( string_view name,
   , ethernet_address_( ethernet_address )
   , ip_address_( ip_address )
   , arp_cache_()
+  , datagrams_cache_()
+  , arp_pending_()
 {
   cerr << "DEBUG: Network interface has Ethernet address " << to_string( ethernet_address_ ) << " and IP address "
        << ip_address.ip() << "\n";
@@ -37,18 +40,19 @@ void NetworkInterface::send_datagram( const InternetDatagram& dgram, const Addre
   frame.header.src = ethernet_address_;
   uint32_t dst_ip_ = next_hop.ipv4_numeric();
   Serializer serializer;
-
-  auto it = arp_cache_.find(dst_ip_);
-  if (it != arp_cache_.end()) {
-    frame.header.dst = it->second;
+  if (arp_cache_.find(dst_ip_) != arp_cache_.end()) {
+    frame.header.dst = arp_cache_[dst_ip_].address;
     frame.header.type = EthernetHeader::TYPE_IPv4;
-
-    
     dgram.serialize(serializer);
     serializer.buffer(frame.payload);
     frame.payload = serializer.finish();
   }
   else {
+    if (arp_pending_.find(dst_ip_) != arp_pending_.end()) {
+      datagrams_cache_[dst_ip_].push(dgram);
+      return;
+    }
+    arp_pending_[dst_ip_] = ARP_PENDING_TIME;
     frame.header.type = EthernetHeader::TYPE_ARP;
     frame.header.dst = ETHERNET_BROADCAST;
 
@@ -64,8 +68,9 @@ void NetworkInterface::send_datagram( const InternetDatagram& dgram, const Addre
     
     arpmessage.serialize(serializer);
     frame.payload = serializer.finish();
-
-    datagrams_received_.push(dgram);
+    std::queue<InternetDatagram> queue;
+    queue.push(dgram);
+    datagrams_cache_.insert({dst_ip_, queue});
   }
   transmit(frame);
 }
@@ -73,12 +78,102 @@ void NetworkInterface::send_datagram( const InternetDatagram& dgram, const Addre
 //! \param[in] frame the incoming Ethernet frame
 void NetworkInterface::recv_frame( EthernetFrame frame )
 {
-  debug( "unimplemented recv_frame called" );
-  (void)frame;
+
+  Parser parser(frame.payload);
+
+  // 如果是ipv4
+  if (frame.header.type == EthernetHeader::TYPE_IPv4) {
+    InternetDatagram dgram;
+    dgram.parse(parser);
+    if (frame.header.dst != ethernet_address_) {
+      cerr << "InternetDatagram.target_ip_address != local address, just ignore\n"; 
+      return;
+    }
+    datagrams_received_.push(dgram);
+  }
+  else if (frame.header.type == EthernetHeader::TYPE_ARP){
+    ARPMessage arpmessage;
+    arpmessage.parse(parser);
+
+    if (arpmessage.target_ip_address != ip_address_.ipv4_numeric()) {
+      cerr << "arpmessage.target_ip_address != local address, just ignore\n"; 
+      return;
+    }
+
+    if (arpmessage.opcode == ARPMessage::OPCODE_REQUEST) {
+      EthernetFrame frame1;
+      frame1.header.src = ethernet_address_;
+      frame1.header.type = EthernetHeader::TYPE_ARP;
+      frame1.header.dst = arpmessage.sender_ethernet_address;
+
+      ARPMessage arpmessage1;
+      arpmessage1.opcode = ARPMessage::OPCODE_REPLY;
+      arpmessage1.sender_ethernet_address = ethernet_address_;
+      arpmessage1.sender_ip_address = ip_address_.ipv4_numeric();
+      arpmessage1.target_ip_address = arpmessage.sender_ip_address;
+      arpmessage1.target_ethernet_address = arpmessage.sender_ethernet_address;
+
+      Serializer serializer;
+      arpmessage1.serialize(serializer);
+      frame1.payload = serializer.finish();
+      transmit(frame1);
+      EthernetAddress_and_time et(arpmessage.sender_ethernet_address, ARP_TIME_TO_LIVE);
+      arp_cache_[arpmessage.sender_ip_address] = et;
+    }
+    else if (arpmessage.opcode == ARPMessage::OPCODE_REPLY) {
+      EthernetAddress_and_time et(arpmessage.sender_ethernet_address, ARP_TIME_TO_LIVE);
+      arp_cache_[arpmessage.sender_ip_address] = et;
+
+      arp_pending_.erase(arpmessage.sender_ip_address);
+
+      auto it = datagrams_cache_.find(arpmessage.sender_ip_address);
+      if (it != datagrams_cache_.end()) {
+        auto& que = it->second;
+        Address next_hop = Address::from_ipv4_numeric(it->first);
+        while (!que.empty()) {
+          auto dgram = que.front();
+          que.pop();
+          send_datagram(dgram, next_hop);
+        }
+      }
+    }
+  }
+
 }
 
 //! \param[in] ms_since_last_tick the number of milliseconds since the last call to this method
 void NetworkInterface::tick( const size_t ms_since_last_tick )
 {
-  debug( "unimplemented tick({}) called", ms_since_last_tick );
+  // debug( "unimplemented tick({}) called", ms_since_last_tick );
+
+  for (auto it = arp_cache_.begin(); it != arp_cache_.end(); ) {
+    if (it->second.left_waiting_time <= ms_since_last_tick) {
+      // send_datagram();//?
+      it = arp_cache_.erase(it);
+    }
+    else {
+      it->second.left_waiting_time -= ms_since_last_tick;
+      ++it;
+    }
+  }
+
+  for (auto it = arp_pending_.begin(); it != arp_pending_.end(); ) {
+    if (it->second <= ms_since_last_tick) {
+      it = arp_pending_.erase(it);  // erase 返回下一个
+    }
+    else {
+      it->second -= ms_since_last_tick;
+      ++it;
+    }
+  }
+
+  for (auto it = datagrams_cache_.begin(); it != datagrams_cache_.end(); ) {
+    if (arp_pending_.find(it->first) == arp_pending_.end()) {
+        it = datagrams_cache_.erase(it);
+    }
+    else {
+      ++it;
+    }
+  }
+  
 }

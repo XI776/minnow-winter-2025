@@ -7,7 +7,7 @@
 #include <memory>
 #include <queue>
 #include <unordered_map>
-
+#include <unordered_set>
 // A "network interface" that connects IP (the internet layer, or network layer)
 // with Ethernet (the network access layer, or link layer).
 
@@ -67,6 +67,23 @@ public:
   OutputPort& output() { return *port_; }
   std::queue<InternetDatagram>& datagrams_received() { return datagrams_received_; }
 
+
+  class Dgram_cache {
+    public:
+      InternetDatagram dgram;
+      Address next_hop;
+  };
+
+  class EthernetAddress_and_time {
+    public:
+      EthernetAddress address;
+      uint32_t left_waiting_time;
+  };
+
+  const uint32_t ARP_TIME_TO_LIVE = 30000;
+  const uint32_t ARP_PENDING_TIME = 5000;
+
+
 private:
   // Human-readable name of the interface
   std::string name_;
@@ -86,7 +103,12 @@ private:
 
 
   // Ethernet frame ARP映射
-  std::unordered_map<uint32_t, EthernetAddress> arp_cache_;
+  std::unordered_map<uint32_t, EthernetAddress_and_time> arp_cache_;
 
-  
+  // Datagrams that have no arp 
+  std::unordered_map<uint32_t, std::queue<InternetDatagram>> datagrams_cache_;
+
+  // 
+  std::unordered_map<uint32_t, uint32_t> arp_pending_;
+
 };
